@@ -26,7 +26,7 @@ export async function probeMedia(url: string, signal?: AbortSignal): Promise<Med
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
-      signal,
+      signal: signal ?? null,
     });
   } catch (error) {
     if ((error as Error)?.name === "AbortError") throw error;
@@ -66,7 +66,7 @@ export async function downloadMedia(options: {
 
   let response: Response;
   try {
-    response = await fetch(buildFetchUrl(url, option, filename), { signal });
+    response = await fetch(buildFetchUrl(url, option, filename), { signal: signal ?? null });
   } catch (error) {
     if ((error as Error)?.name === "AbortError") throw error;
     throw new DownloaderError(
