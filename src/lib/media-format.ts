@@ -94,5 +94,5 @@ export function qualityLabel(option: MediaOption): string {
 
 export function shortCodec(codec?: string): string | null {
   if (!codec || codec === "none") return null;
-  return codec.split(".")[0].toUpperCase();
+  return (codec.split(".")[0] ?? codec).toUpperCase();
 }
