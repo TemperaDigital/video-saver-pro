@@ -16,6 +16,9 @@ async function readError(response: Response): Promise<string> {
   } catch {
     /* corpo não-JSON */
   }
+  if (response.status === 404 || response.status === 502 || response.status === 503) {
+    return "Motor de extração não encontrado nesta origem. Rode o stack Docker (porta 3005) ou defina VITE_DOWNLOADER_URL.";
+  }
   return `Falha na comunicação com o motor (HTTP ${response.status}).`;
 }
 
