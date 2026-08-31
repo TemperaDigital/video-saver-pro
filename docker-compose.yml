@@ -1,0 +1,38 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    restart: unless-stopped
+    expose:
+      - "3000"
+
+  extractor:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.extractor
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      # Descomente após montar o cookies.txt abaixo (necessário para
+      # conteúdo restrito de Instagram/Facebook).
+      # COOKIES_FILE: /cookies/cookies.txt
+      CORS_ORIGIN: "*"
+    volumes:
+      - ./cookies:/cookies:ro
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - web
+      - extractor
+
+volumes:
+  caddy_data:

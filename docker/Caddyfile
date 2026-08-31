@@ -1,0 +1,19 @@
+:3005 {
+	encode gzip
+
+	# Motor de extração (probe/fetch)
+	handle /api/dl/* {
+		reverse_proxy extractor:8080 {
+			flush_interval -1
+			transport http {
+				response_header_timeout 30m
+				read_timeout 30m
+			}
+		}
+	}
+
+	# Interface web
+	handle {
+		reverse_proxy web:3000
+	}
+}
