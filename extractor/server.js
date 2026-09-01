@@ -12,10 +12,16 @@ import { spawn } from "node:child_process";
 import { URL } from "node:url";
 import { lookup } from "node:dns/promises";
 import net from "node:net";
+import fs from "node:fs";
+import path from "node:path";
 
 const PORT = Number(process.env.PORT || 8080);
 const YTDLP = process.env.YTDLP_PATH || "yt-dlp";
+const COOKIES_DIR = process.env.COOKIES_DIR || "/cookies";
+/** Arquivo gerenciado pela interface (tem prioridade sobre COOKIES_FILE). */
+const MANAGED_COOKIES = path.join(COOKIES_DIR, "cookies.txt");
 const COOKIES_FILE = process.env.COOKIES_FILE || "";
+const MAX_COOKIES_BYTES = 4 * 1024 * 1024;
 const MAX_TITLE = 200;
 
 const FORMAT_SELECTOR = /^[A-Za-z0-9_+\-./[\]=<>*: ]{1,120}$/;
@@ -37,7 +43,7 @@ function corsHeaders() {
   return {
     "access-control-allow-origin": process.env.CORS_ORIGIN || "*",
     "access-control-allow-headers": "content-type",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
   };
 }
 
@@ -100,10 +106,94 @@ class HttpError extends Error {
   }
 }
 
+/** Caminho do cookies.txt em uso, ou "" quando não há nenhum. */
+function activeCookiesPath() {
+  for (const candidate of [MANAGED_COOKIES, COOKIES_FILE]) {
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+  return "";
+}
+
 function baseArgs() {
   const args = ["--no-playlist", "--no-warnings", "--no-progress"];
-  if (COOKIES_FILE) args.push("--cookies", COOKIES_FILE);
+  const cookies = activeCookiesPath();
+  if (cookies) args.push("--cookies", cookies);
   return args;
+}
+
+/* -------------------------- cookies (links c/ login) --------------------- */
+
+function parseCookieDomains(content) {
+  const domains = new Set();
+  for (const line of String(content).split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const domain = trimmed.split(/\t|\s{2,}/)[0];
+    if (domain) domains.add(domain.replace(/^\./, "").toLowerCase());
+  }
+  return [...domains].sort().slice(0, 60);
+}
+
+function cookiesStatus() {
+  const file = activeCookiesPath();
+  if (!file) return { present: false, domains: [], managed: false };
+  let content = "";
+  try {
+    content = fs.readFileSync(file, "utf8");
+  } catch {
+    return { present: false, domains: [], managed: false };
+  }
+  const stat = fs.statSync(file);
+  return {
+    present: true,
+    managed: file === MANAGED_COOKIES,
+    updatedAt: stat.mtimeMs,
+    size: stat.size,
+    domains: parseCookieDomains(content),
+  };
+}
+
+async function handleCookiesSave(req, res) {
+  const body = await readBody(req, MAX_COOKIES_BYTES);
+  let payload;
+  try {
+    payload = JSON.parse(body || "{}");
+  } catch {
+    throw new HttpError(400, "Corpo da requisição inválido.");
+  }
+  const content = String(payload.content || "").trim();
+  if (!content) throw new HttpError(400, "Envie o conteúdo do arquivo cookies.txt.");
+  if (Buffer.byteLength(content) > MAX_COOKIES_BYTES) {
+    throw new HttpError(413, "Arquivo de cookies grande demais.");
+  }
+  const looksValid =
+    /^#\s*(Netscape|HTTP Cookie File)/im.test(content) ||
+    content.split("\n").some((line) => line.split("\t").length >= 6);
+  if (!looksValid) {
+    throw new HttpError(
+      400,
+      "Formato inválido. Exporte os cookies no formato Netscape (cookies.txt).",
+    );
+  }
+  try {
+    fs.mkdirSync(COOKIES_DIR, { recursive: true });
+    fs.writeFileSync(MANAGED_COOKIES, `${content}\n`, { mode: 0o600 });
+  } catch {
+    throw new HttpError(
+      500,
+      "Não foi possível gravar os cookies. Monte o volume ./cookies com permissão de escrita.",
+    );
+  }
+  json(res, 200, cookiesStatus());
+}
+
+function handleCookiesDelete(res) {
+  try {
+    if (fs.existsSync(MANAGED_COOKIES)) fs.rmSync(MANAGED_COOKIES);
+  } catch {
+    throw new HttpError(500, "Não foi possível remover o arquivo de cookies.");
+  }
+  json(res, 200, cookiesStatus());
 }
 
 function runYtdlp(args, { timeoutMs = 60_000 } = {}) {
@@ -305,12 +395,12 @@ function contentTypeFor(ext) {
   return map[ext] || "application/octet-stream";
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = 10_000) {
   return new Promise((resolve, reject) => {
     let data = "";
     req.on("data", (chunk) => {
       data += chunk;
-      if (data.length > 10_000) {
+      if (data.length > maxBytes) {
         reject(new HttpError(413, "Requisição grande demais."));
         req.destroy();
       }
@@ -324,7 +414,7 @@ function readBody(req) {
 
 const server = createServer(async (req, res) => {
   const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  const path = requestUrl.pathname.replace(/^\/api\/dl/, "") || "/";
+  const route = requestUrl.pathname.replace(/^\/api\/dl/, "") || "/";
 
   try {
     if (req.method === "OPTIONS") {
@@ -332,15 +422,27 @@ const server = createServer(async (req, res) => {
       res.end();
       return;
     }
-    if (path === "/health") {
-      json(res, 200, { ok: true });
+    if (route === "/health") {
+      json(res, 200, { ok: true, cookies: cookiesStatus().present });
       return;
     }
-    if (path === "/probe" && req.method === "POST") {
+    if (route === "/cookies" && req.method === "GET") {
+      json(res, 200, cookiesStatus());
+      return;
+    }
+    if (route === "/cookies" && (req.method === "POST" || req.method === "PUT")) {
+      await handleCookiesSave(req, res);
+      return;
+    }
+    if (route === "/cookies" && req.method === "DELETE") {
+      handleCookiesDelete(res);
+      return;
+    }
+    if (route === "/probe" && req.method === "POST") {
       await handleProbe(req, res);
       return;
     }
-    if (path === "/fetch" && req.method === "GET") {
+    if (route === "/fetch" && req.method === "GET") {
       await handleFetch(req, res, requestUrl);
       return;
     }
