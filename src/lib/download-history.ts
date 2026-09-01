@@ -1,7 +1,7 @@
 import type { HistoryEntry } from "./download-types";
 
 const STORAGE_KEY = "baixador:historico";
-const MAX_ENTRIES = 20;
+const MAX_ENTRIES = 200;
 
 export function readHistory(): HistoryEntry[] {
   if (typeof window === "undefined") return [];
@@ -24,6 +24,12 @@ export function appendHistory(entry: HistoryEntry): HistoryEntry[] {
     0,
     MAX_ENTRIES,
   );
+  persist(next);
+  return next;
+}
+
+export function removeHistoryEntry(id: string): HistoryEntry[] {
+  const next = readHistory().filter((item) => item.id !== id);
   persist(next);
   return next;
 }
