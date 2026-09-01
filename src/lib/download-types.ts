@@ -39,4 +39,21 @@ export interface HistoryEntry {
   platform: string;
   url: string;
   at: number;
+  /** Seletor de formato usado, para refazer o download com um clique. */
+  formatId?: string;
+  ext?: string;
+  /** Qualidade legível (ex.: "1080p · Full HD"). */
+  quality?: string;
+  /** Bytes efetivamente transferidos. */
+  bytes?: number;
+}
+
+/** Situação do arquivo cookies.txt no motor (links que exigem login). */
+export interface CookiesStatus {
+  present: boolean;
+  /** Verdadeiro quando o arquivo foi enviado pela interface. */
+  managed?: boolean;
+  updatedAt?: number;
+  size?: number;
+  domains: string[];
 }

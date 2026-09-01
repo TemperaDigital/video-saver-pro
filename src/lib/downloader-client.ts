@@ -51,6 +51,21 @@ export function buildFetchUrl(url: string, option: MediaOption, filename: string
   return `${DOWNLOADER_BASE_URL}/fetch?${params.toString()}`;
 }
 
+/**
+ * Mesma URL do download, porém absoluta — pronta para colar em outro aparelho
+ * da rede, num gerenciador de downloads ou compartilhar.
+ */
+export function buildAbsoluteFetchUrl(
+  url: string,
+  option: MediaOption,
+  filename: string,
+): string {
+  const relative = buildFetchUrl(url, option, filename);
+  if (/^https?:\/\//i.test(relative)) return relative;
+  if (typeof window === "undefined") return relative;
+  return new URL(relative, window.location.origin).toString();
+}
+
 export interface DownloadProgress {
   receivedBytes: number;
   totalBytes: number | null;
